@@ -27,7 +27,7 @@ pub enum Token {
 }
 
 impl Token {
-    fn from(string_value: &str) -> Option<Token> {
+    fn from_str(string_value: &str) -> Option<Token> {
         match string_value {
             "ns" => Some(Token::Ns),
             "def" => Some(Token::Def),
@@ -38,12 +38,22 @@ impl Token {
             _ => None,
         }
     }
+
+    fn from_char(char_value: char) -> Option<Token> {
+        match char_value {
+            '+' => Some(Token::Identifier(String::from("+"))),
+            '-' => Some(Token::Identifier(String::from("-"))),
+            '*' => Some(Token::Identifier(String::from("*"))),
+            '/' => Some(Token::Identifier(String::from("/"))),
+            _ => None,
+        }
+    }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Position {
-    line: usize,
-    position: usize,
+    pub line: usize,
+    pub position: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -84,7 +94,7 @@ struct CharAndPosition {
 #[derive(Debug)]
 pub enum TokenizerError {
     IoError(io::Error),
-    ParseError {
+    ReadError {
         message: String,
         from: Position,
         to: Position,
@@ -104,7 +114,7 @@ impl TokenizerError {
         to: Position,
         float_parse_error: std::num::ParseFloatError,
     ) -> TokenizerError {
-        TokenizerError::ParseError {
+        TokenizerError::ReadError {
             message: format!("Unable to parse number '{}': {}", text, float_parse_error),
             from,
             to,
@@ -249,7 +259,7 @@ where
                 line: tok.line,
                 position: tok.position - 1,
             };
-            if let Some(reserved_token) = Token::from(&ident) {
+            if let Some(reserved_token) = Token::from_str(&ident) {
                 return Ok(TokenAndSpan {
                     token: reserved_token,
                     from,
@@ -294,10 +304,34 @@ where
             }
         }
 
-        // every other case is simply EOF and unknown char
+        // every other case is either a reserved char, EOF or simply an unknown char
         self.step_next_char()?;
-        if tok.chr.is_none() {
-            Ok(TokenAndSpan {
+        match tok.chr {
+            Some(char_value) => match Token::from_char(char_value) {
+                Some(token) => Ok(TokenAndSpan {
+                    token,
+                    from: Position {
+                        line: tok.line,
+                        position: tok.position,
+                    },
+                    to: Position {
+                        line: tok.line,
+                        position: tok.position,
+                    },
+                }),
+                None => Ok(TokenAndSpan {
+                    token: Token::Unknown(tok.chr.unwrap()),
+                    from: Position {
+                        line: tok.line,
+                        position: tok.position,
+                    },
+                    to: Position {
+                        line: tok.line,
+                        position: tok.position,
+                    },
+                }),
+            },
+            None => Ok(TokenAndSpan {
                 token: Token::Eof,
                 from: Position {
                     line: tok.line,
@@ -307,19 +341,7 @@ where
                     line: tok.line,
                     position: tok.position,
                 },
-            })
-        } else {
-            Ok(TokenAndSpan {
-                token: Token::Unknown(tok.chr.unwrap()),
-                from: Position {
-                    line: tok.line,
-                    position: tok.position,
-                },
-                to: Position {
-                    line: tok.line,
-                    position: tok.position,
-                },
-            })
+            }),
         }
     }
 }
@@ -773,7 +795,7 @@ mod tests {
     #[test]
     fn it_throws_error_on_bad_numeric() -> Result<(), TokenizerError> {
         let mut handler = GreedyTokenizer::new(&b"120.0.1"[..])?;
-        if let TokenizerError::ParseError { message, from, to } = handler.get_token().unwrap_err() {
+        if let TokenizerError::ReadError { message, from, to } = handler.get_token().unwrap_err() {
             assert_eq!(
                 &message,
                 &"Unable to parse number '120.0.1': invalid float literal"
@@ -826,7 +848,7 @@ mod tests {
                 }
             }
         );
-        if let TokenizerError::ParseError { message, from, to } = handler.get_token().unwrap_err() {
+        if let TokenizerError::ReadError { message, from, to } = handler.get_token().unwrap_err() {
             assert_eq!(
                 &message,
                 &"Unable to parse number '120.0.1': invalid float literal"
@@ -938,6 +960,85 @@ mod tests {
                 to: Position {
                     line: 0,
                     position: 16
+                }
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_handles_reserved_chars_tokens() -> Result<(), TokenizerError> {
+        let mut handler = GreedyTokenizer::new(&b"+"[..])?;
+        assert_eq!(
+            handler.get_token()?,
+            TokenAndSpan {
+                token: Token::Identifier(String::from("+")),
+                from: Position {
+                    line: 0,
+                    position: 0
+                },
+                to: Position {
+                    line: 0,
+                    position: 0
+                }
+            }
+        );
+        assert_eq!(
+            handler.get_token()?,
+            TokenAndSpan {
+                token: Token::Eof,
+                from: Position {
+                    line: 0,
+                    position: 1
+                },
+                to: Position {
+                    line: 0,
+                    position: 1
+                }
+            }
+        );
+
+        let mut handler = GreedyTokenizer::new(&b"   -)  # whodat"[..])?;
+        assert_eq!(
+            handler.get_token()?,
+            TokenAndSpan {
+                token: Token::Identifier(String::from("-")),
+                from: Position {
+                    line: 0,
+                    position: 3
+                },
+                to: Position {
+                    line: 0,
+                    position: 3
+                }
+            }
+        );
+        assert_eq!(
+            handler.get_token()?,
+            TokenAndSpan {
+                token: Token::CloseParen,
+                from: Position {
+                    line: 0,
+                    position: 4
+                },
+                to: Position {
+                    line: 0,
+                    position: 4
+                }
+            }
+        );
+        assert_eq!(
+            handler.get_token()?,
+            TokenAndSpan {
+                token: Token::Eof,
+                from: Position {
+                    line: 0,
+                    position: 15
+                },
+                to: Position {
+                    line: 0,
+                    position: 15
                 }
             }
         );

@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 clap = "2.33.3"
+
+[dev-dependencies]
+rstest = "0.7.0"

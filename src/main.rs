@@ -1,9 +1,12 @@
 #[macro_use]
 extern crate clap;
 
+pub mod ast;
+pub mod parser;
 pub mod tok;
 
 use clap::AppSettings;
+use parser::RecursiveDescentParser;
 use std::fs::File;
 use std::path::Path;
 use tok::{GreedyTokenizer, Token, Tokenizer};
@@ -16,6 +19,9 @@ fn main() {
         (@arg INPUT: +required "Sets the input file to use")
         (@subcommand tokenize =>
             (about: "Tokenize the file and print out the tokens")
+        )
+        (@subcommand parse =>
+            (about: "Parse the file and print out the ASTs")
         )
     )
     .setting(AppSettings::SubcommandRequiredElseHelp)
@@ -49,6 +55,21 @@ fn main() {
             // if we encounter Eof, break
             if char_and_position.token == Token::Eof {
                 break;
+            }
+        }
+    }
+
+    // Parser stuff
+    if matches.subcommand_matches("parse").is_some() {
+        let mut parser = RecursiveDescentParser::new(Box::new(tokenizer));
+        loop {
+            match parser.next_expression() {
+                Ok(Some(something)) => println!("{:?}", something),
+                Ok(None) => break,
+                Err(err) => {
+                    println!("{:?}", err);
+                    break;
+                }
             }
         }
     }
