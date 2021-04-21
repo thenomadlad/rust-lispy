@@ -9,7 +9,7 @@ use clap::AppSettings;
 use parser::RecursiveDescentParser;
 use std::fs::File;
 use std::path::Path;
-use tok::{GreedyTokenizer, Token, Tokenizer};
+use tok::{GreedyTokenizer, Token};
 
 fn main() {
     let matches = clap_app!(lispy =>
@@ -27,14 +27,14 @@ fn main() {
     .setting(AppSettings::SubcommandRequiredElseHelp)
     .get_matches();
 
-    let mut tokenizer =
-        GreedyTokenizer::new(read_file(matches.value_of("INPUT").unwrap())).unwrap();
-
     // Tokenizer stuff
     if matches.subcommand_matches("tokenize").is_some() {
+        let tokenizer =
+            GreedyTokenizer::new(read_file(matches.value_of("INPUT").unwrap())).unwrap();
         let mut tabs = 0;
-        loop {
-            let char_and_position = tokenizer.get_token().unwrap();
+
+        for token in tokenizer {
+            let char_and_position = token.unwrap();
 
             // if we encounter a ), reduce tabs before printing
             if char_and_position.token == Token::CloseParen {
@@ -51,17 +51,15 @@ fn main() {
             if char_and_position.token == Token::OpenParen {
                 tabs += 1;
             }
-
-            // if we encounter Eof, break
-            if char_and_position.token == Token::Eof {
-                break;
-            }
         }
     }
 
     // Parser stuff
     if matches.subcommand_matches("parse").is_some() {
+        let tokenizer =
+            GreedyTokenizer::new(read_file(matches.value_of("INPUT").unwrap())).unwrap();
         let mut parser = RecursiveDescentParser::new(Box::new(tokenizer));
+
         loop {
             match parser.next_expression() {
                 Ok(Some(something)) => println!("{:?}", something),

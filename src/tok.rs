@@ -5,19 +5,15 @@ const SPACE_CHAR: char = ' ';
 const NEWLINE_CHAR: char = '\n';
 const CARRIAGE_RETURN_CHAR: char = '\r';
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     // standard symbols
-    Eof,
     OpenParen,
     CloseParen,
 
     // reserved keywords
-    Ns,
     Def,
-    Defn,
     Fn,
-    Quote,
     If,
 
     // more complex stuff
@@ -29,11 +25,8 @@ pub enum Token {
 impl Token {
     fn from_str(string_value: &str) -> Option<Token> {
         match string_value {
-            "ns" => Some(Token::Ns),
             "def" => Some(Token::Def),
-            "defn" => Some(Token::Defn),
             "fn" => Some(Token::Fn),
-            "quote" => Some(Token::Quote),
             "if" => Some(Token::If),
             _ => None,
         }
@@ -56,7 +49,7 @@ pub struct Position {
     pub position: usize,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct TokenAndSpan {
     pub token: Token,
     pub from: Position,
@@ -122,9 +115,16 @@ impl TokenizerError {
     }
 }
 
-pub trait Tokenizer {
-    fn get_token(&mut self) -> Result<TokenAndSpan, TokenizerError>;
+// hack: just get it working for tests
+impl PartialEq for TokenizerError {
+    fn eq(&self, rhs: &TokenizerError) -> bool {
+        format!("{:?}", self) == format!("{:?}", rhs)
+    }
 }
+
+pub trait Tokenizer: Iterator<Item = Result<TokenAndSpan, TokenizerError>> {}
+
+impl<T: Iterator<Item = Result<TokenAndSpan, TokenizerError>>> Tokenizer for T {}
 
 pub struct GreedyTokenizer<T>
 where
@@ -186,13 +186,8 @@ where
 
         Ok(())
     }
-}
 
-impl<T> Tokenizer for GreedyTokenizer<T>
-where
-    T: Read,
-{
-    fn get_token(&mut self) -> Result<TokenAndSpan, TokenizerError> {
+    fn move_to_next_token(&mut self) -> Result<Option<TokenAndSpan>, TokenizerError> {
         let mut tok = self.current_char;
 
         // remove any whitespace
@@ -215,7 +210,7 @@ where
         // find parens
         if tok.chr == Some('(') {
             self.step_next_char()?;
-            return Ok(TokenAndSpan {
+            return Ok(Some(TokenAndSpan {
                 token: Token::OpenParen,
                 from: Position {
                     line: tok.line,
@@ -225,10 +220,10 @@ where
                     line: tok.line,
                     position: tok.position,
                 },
-            });
+            }));
         } else if tok.chr == Some(')') {
             self.step_next_char()?;
-            return Ok(TokenAndSpan {
+            return Ok(Some(TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
                     line: tok.line,
@@ -238,7 +233,7 @@ where
                     line: tok.line,
                     position: tok.position,
                 },
-            });
+            }));
         }
 
         // recognize any identifiers
@@ -260,18 +255,18 @@ where
                 position: tok.position - 1,
             };
             if let Some(reserved_token) = Token::from_str(&ident) {
-                return Ok(TokenAndSpan {
+                return Ok(Some(TokenAndSpan {
                     token: reserved_token,
                     from,
                     to,
-                });
+                }));
             }
 
-            return Ok(TokenAndSpan {
+            return Ok(Some(TokenAndSpan {
                 token: Token::Identifier(ident),
                 from,
                 to,
-            });
+            }));
         }
 
         // recognizing any numeric things
@@ -294,11 +289,11 @@ where
 
             match numstr.parse() {
                 Ok(parsed) => {
-                    return Ok(TokenAndSpan {
+                    return Ok(Some(TokenAndSpan {
                         token: Token::Number(parsed),
                         from,
                         to,
-                    })
+                    }))
                 }
                 Err(e) => return Err(TokenizerError::from(numstr, from, to, e)),
             }
@@ -308,7 +303,7 @@ where
         self.step_next_char()?;
         match tok.chr {
             Some(char_value) => match Token::from_char(char_value) {
-                Some(token) => Ok(TokenAndSpan {
+                Some(token) => Ok(Some(TokenAndSpan {
                     token,
                     from: Position {
                         line: tok.line,
@@ -318,8 +313,8 @@ where
                         line: tok.line,
                         position: tok.position,
                     },
-                }),
-                None => Ok(TokenAndSpan {
+                })),
+                None => Ok(Some(TokenAndSpan {
                     token: Token::Unknown(tok.chr.unwrap()),
                     from: Position {
                         line: tok.line,
@@ -329,19 +324,24 @@ where
                         line: tok.line,
                         position: tok.position,
                     },
-                }),
+                })),
             },
-            None => Ok(TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: tok.line,
-                    position: tok.position,
-                },
-                to: Position {
-                    line: tok.line,
-                    position: tok.position,
-                },
-            }),
+            None => Ok(None),
+        }
+    }
+}
+
+impl<T> Iterator for GreedyTokenizer<T>
+where
+    T: Read,
+{
+    type Item = Result<TokenAndSpan, TokenizerError>;
+
+    fn next(&mut self) -> Option<Result<TokenAndSpan, TokenizerError>> {
+        match self.move_to_next_token() {
+            Ok(Some(item)) => Some(Ok(item)),
+            Ok(None) => None,
+            Err(item) => Some(Err(item)),
         }
     }
 }
@@ -377,36 +377,10 @@ mod tests {
     #[test]
     fn it_handles_empty_buffer() -> Result<(), TokenizerError> {
         let inbuf = &b""[..];
-        assert_eq!(
-            GreedyTokenizer::new(inbuf)?.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 0
-                },
-                to: Position {
-                    line: 0,
-                    position: 0
-                },
-            }
-        );
+        assert!(GreedyTokenizer::new(inbuf)?.next().is_none());
 
         let inbuf = &b"   "[..];
-        assert_eq!(
-            GreedyTokenizer::new(inbuf)?.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 3
-                },
-                to: Position {
-                    line: 0,
-                    position: 3
-                },
-            }
-        );
+        assert!(GreedyTokenizer::new(inbuf)?.next().is_none());
 
         Ok(())
     }
@@ -414,40 +388,14 @@ mod tests {
     #[test]
     fn it_ignores_file_containing_only_comments() -> Result<(), TokenizerError> {
         let inbuf = &b"# blah"[..];
-        assert_eq!(
-            GreedyTokenizer::new(inbuf)?.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 6
-                },
-                to: Position {
-                    line: 0,
-                    position: 6
-                },
-            }
-        );
+        assert!(GreedyTokenizer::new(inbuf)?.next().is_none());
 
         let inbuf = &b"  # blah"[..];
-        assert_eq!(
-            GreedyTokenizer::new(inbuf)?.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 8
-                },
-                to: Position {
-                    line: 0,
-                    position: 8
-                },
-            }
-        );
+        assert!(GreedyTokenizer::new(inbuf)?.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"  # only \n # comments"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Unknown('\n'),
                 from: Position {
@@ -460,24 +408,11 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 1,
-                    position: 11
-                },
-                to: Position {
-                    line: 1,
-                    position: 11
-                }
-            }
-        );
+        assert!(handler.next().is_none(),);
 
         let mut handler = GreedyTokenizer::new(&b"  # only \r # comments"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Unknown('\r'),
                 from: Position {
@@ -490,20 +425,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 1,
-                    position: 11
-                },
-                to: Position {
-                    line: 1,
-                    position: 11
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }
@@ -512,7 +434,7 @@ mod tests {
     fn it_handles_parens() -> Result<(), TokenizerError> {
         let mut handler = GreedyTokenizer::new(&b"("[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::OpenParen,
                 from: Position {
@@ -525,24 +447,11 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 1
-                },
-                to: Position {
-                    line: 0,
-                    position: 1
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"   ()  # whodat"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::OpenParen,
                 from: Position {
@@ -556,7 +465,7 @@ mod tests {
             }
         );
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
@@ -569,20 +478,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 15
-                },
-                to: Position {
-                    line: 0,
-                    position: 15
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }
@@ -594,7 +490,7 @@ mod tests {
         // two open parens
         for position in 0..2 {
             assert_eq!(
-                handler.get_token()?,
+                handler.next().unwrap()?,
                 TokenAndSpan {
                     token: Token::OpenParen,
                     from: Position { line: 0, position },
@@ -606,7 +502,7 @@ mod tests {
         // two close parens
         for position in 2..4 {
             assert_eq!(
-                handler.get_token()?,
+                handler.next().unwrap()?,
                 TokenAndSpan {
                     token: Token::CloseParen,
                     from: Position { line: 0, position },
@@ -616,20 +512,7 @@ mod tests {
         }
 
         // an eof at the end
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 4
-                },
-                to: Position {
-                    line: 0,
-                    position: 4
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }
@@ -638,7 +521,7 @@ mod tests {
     fn it_handles_identifier_token() -> Result<(), TokenizerError> {
         let mut handler = GreedyTokenizer::new(&b"some_1dentifier"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Identifier(String::from("some_1dentifier")),
                 from: Position {
@@ -651,24 +534,11 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 15
-                },
-                to: Position {
-                    line: 0,
-                    position: 15
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"   w1432)  # whodat"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Identifier(String::from("w1432")),
                 from: Position {
@@ -682,7 +552,7 @@ mod tests {
             }
         );
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
@@ -695,20 +565,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 19
-                },
-                to: Position {
-                    line: 0,
-                    position: 19
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }
@@ -717,7 +574,7 @@ mod tests {
     fn it_handles_numeric_token() -> Result<(), TokenizerError> {
         let mut handler = GreedyTokenizer::new(&b"120"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Number(120.0),
                 from: Position {
@@ -730,24 +587,11 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 3
-                },
-                to: Position {
-                    line: 0,
-                    position: 3
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"   3.14159)  # delicious"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Number(3.14159),
                 from: Position {
@@ -761,7 +605,7 @@ mod tests {
             }
         );
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
@@ -774,20 +618,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 24
-                },
-                to: Position {
-                    line: 0,
-                    position: 24
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }
@@ -795,7 +626,9 @@ mod tests {
     #[test]
     fn it_throws_error_on_bad_numeric() -> Result<(), TokenizerError> {
         let mut handler = GreedyTokenizer::new(&b"120.0.1"[..])?;
-        if let TokenizerError::ReadError { message, from, to } = handler.get_token().unwrap_err() {
+        if let TokenizerError::ReadError { message, from, to } =
+            handler.next().unwrap().unwrap_err()
+        {
             assert_eq!(
                 &message,
                 &"Unable to parse number '120.0.1': invalid float literal"
@@ -818,24 +651,11 @@ mod tests {
             panic!();
         }
 
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 7
-                },
-                to: Position {
-                    line: 0,
-                    position: 7
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"  # feckin tool \n 120.0.1"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Unknown('\n'),
                 from: Position {
@@ -848,7 +668,9 @@ mod tests {
                 }
             }
         );
-        if let TokenizerError::ReadError { message, from, to } = handler.get_token().unwrap_err() {
+        if let TokenizerError::ReadError { message, from, to } =
+            handler.next().unwrap().unwrap_err()
+        {
             assert_eq!(
                 &message,
                 &"Unable to parse number '120.0.1': invalid float literal"
@@ -870,59 +692,33 @@ mod tests {
         } else {
             panic!();
         }
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 1,
-                    position: 8
-                },
-                to: Position {
-                    line: 1,
-                    position: 8
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }
 
     #[test]
     fn it_handles_reserved_keyword_tokens() -> Result<(), TokenizerError> {
-        let mut handler = GreedyTokenizer::new(&b"defn"[..])?;
+        let mut handler = GreedyTokenizer::new(&b"def"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
-                token: Token::Defn,
+                token: Token::Def,
                 from: Position {
                     line: 0,
                     position: 0
                 },
                 to: Position {
                     line: 0,
-                    position: 3
+                    position: 2
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 4
-                },
-                to: Position {
-                    line: 0,
-                    position: 4
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"   if)  # whodat"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::If,
                 from: Position {
@@ -936,7 +732,7 @@ mod tests {
             }
         );
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
@@ -949,20 +745,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 16
-                },
-                to: Position {
-                    line: 0,
-                    position: 16
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }
@@ -971,7 +754,7 @@ mod tests {
     fn it_handles_reserved_chars_tokens() -> Result<(), TokenizerError> {
         let mut handler = GreedyTokenizer::new(&b"+"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Identifier(String::from("+")),
                 from: Position {
@@ -984,24 +767,11 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 1
-                },
-                to: Position {
-                    line: 0,
-                    position: 1
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"   -)  # whodat"[..])?;
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::Identifier(String::from("-")),
                 from: Position {
@@ -1015,7 +785,7 @@ mod tests {
             }
         );
         assert_eq!(
-            handler.get_token()?,
+            handler.next().unwrap()?,
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
@@ -1028,20 +798,7 @@ mod tests {
                 }
             }
         );
-        assert_eq!(
-            handler.get_token()?,
-            TokenAndSpan {
-                token: Token::Eof,
-                from: Position {
-                    line: 0,
-                    position: 15
-                },
-                to: Position {
-                    line: 0,
-                    position: 15
-                }
-            }
-        );
+        assert!(handler.next().is_none());
 
         Ok(())
     }

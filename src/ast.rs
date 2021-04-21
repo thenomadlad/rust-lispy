@@ -11,4 +11,5 @@ pub enum AST {
         parameters: Vec<String>,
         body: Box<AST>,
     },
+    ListExpr(Vec<AST>),
 }
