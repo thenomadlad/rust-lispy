@@ -77,7 +77,7 @@ impl Display for TokenAndSpan {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 struct CharAndPosition {
     chr: Option<char>,
     line: usize,
@@ -187,16 +187,20 @@ where
         Ok(())
     }
 
-    fn move_to_next_token(&mut self) -> Result<Option<TokenAndSpan>, TokenizerError> {
+    fn fast_forward_comments_and_spaces(&mut self) -> Result<(), TokenizerError> {
+        let start_tok = self.current_char;
         let mut tok = self.current_char;
 
         // remove any whitespace
-        while tok.chr == Some(SPACE_CHAR) {
+        while tok.chr == Some(SPACE_CHAR)
+            || tok.chr == Some(NEWLINE_CHAR)
+            || tok.chr == Some(CARRIAGE_RETURN_CHAR)
+        {
             self.step_next_char()?;
             tok = self.current_char;
         }
 
-        // ignore comments
+        // ignore comments - this could go to the end of the line
         if tok.chr == Some('#') {
             while tok.chr != Some(NEWLINE_CHAR)
                 && tok.chr != Some(CARRIAGE_RETURN_CHAR)
@@ -206,6 +210,19 @@ where
                 tok = self.current_char;
             }
         }
+
+        // if we ended up in a new line, we need to process more spaces
+        if self.current_char != start_tok {
+            self.fast_forward_comments_and_spaces()?;
+        }
+
+        Ok(())
+    }
+
+    fn move_to_next_token(&mut self) -> Result<Option<TokenAndSpan>, TokenizerError> {
+        self.fast_forward_comments_and_spaces()?;
+
+        let mut tok = self.current_char;
 
         // find parens
         if tok.chr == Some('(') {
@@ -394,37 +411,9 @@ mod tests {
         assert!(GreedyTokenizer::new(inbuf)?.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"  # only \n # comments"[..])?;
-        assert_eq!(
-            handler.next().unwrap()?,
-            TokenAndSpan {
-                token: Token::Unknown('\n'),
-                from: Position {
-                    line: 0,
-                    position: 9
-                },
-                to: Position {
-                    line: 0,
-                    position: 9
-                }
-            }
-        );
-        assert!(handler.next().is_none(),);
+        assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"  # only \r # comments"[..])?;
-        assert_eq!(
-            handler.next().unwrap()?,
-            TokenAndSpan {
-                token: Token::Unknown('\r'),
-                from: Position {
-                    line: 0,
-                    position: 9
-                },
-                to: Position {
-                    line: 0,
-                    position: 9
-                }
-            }
-        );
         assert!(handler.next().is_none());
 
         Ok(())
@@ -654,20 +643,6 @@ mod tests {
         assert!(handler.next().is_none());
 
         let mut handler = GreedyTokenizer::new(&b"  # feckin tool \n 120.0.1"[..])?;
-        assert_eq!(
-            handler.next().unwrap()?,
-            TokenAndSpan {
-                token: Token::Unknown('\n'),
-                from: Position {
-                    line: 0,
-                    position: 16
-                },
-                to: Position {
-                    line: 0,
-                    position: 16
-                }
-            }
-        );
         if let TokenizerError::ReadError { message, from, to } =
             handler.next().unwrap().unwrap_err()
         {

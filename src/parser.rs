@@ -68,8 +68,8 @@ impl RecursiveDescentParser {
                             if rec_parsed > 1 {
                                 return Err(ParseError::UnexpectedExpressionError {
                                     expected: None,
-                                    found: rhs.get(1).cloned()
-                                })
+                                    found: rhs.get(1).cloned(),
+                                });
                             }
 
                             result.push(AST::EvaluateExpr {

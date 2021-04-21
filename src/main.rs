@@ -65,7 +65,7 @@ fn main() {
                 Ok(Some(something)) => println!("{:?}", something),
                 Ok(None) => break,
                 Err(err) => {
-                    println!("{:?}", err);
+                    println!("Err: {:?}", err);
                     break;
                 }
             }
