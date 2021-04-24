@@ -14,7 +14,7 @@ pub enum Token {
     // reserved keywords
     Def,
     Fn,
-    If,
+    // If, // todo
 
     // more complex stuff
     Identifier(String),
@@ -27,7 +27,7 @@ impl Token {
         match string_value {
             "def" => Some(Token::Def),
             "fn" => Some(Token::Fn),
-            "if" => Some(Token::If),
+            // "if" => Some(Token::If),
             _ => None,
         }
     }
@@ -143,11 +143,11 @@ where
     pub fn new(inbuf: T) -> io::Result<Self> {
         let mut tok = GreedyTokenizer {
             inbuf,
-            line: 0,
+            line: 1,
             position: 0,
             current_char: CharAndPosition {
                 chr: None,
-                line: 0,
+                line: 1,
                 position: 0,
             },
         };
@@ -427,11 +427,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::OpenParen,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 }
             }
@@ -444,11 +444,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::OpenParen,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 3
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 3
                 }
             }
@@ -458,11 +458,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 4
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 4
                 }
             }
@@ -482,8 +482,8 @@ mod tests {
                 handler.next().unwrap()?,
                 TokenAndSpan {
                     token: Token::OpenParen,
-                    from: Position { line: 0, position },
-                    to: Position { line: 0, position }
+                    from: Position { line: 1, position },
+                    to: Position { line: 1, position }
                 }
             );
         }
@@ -494,8 +494,8 @@ mod tests {
                 handler.next().unwrap()?,
                 TokenAndSpan {
                     token: Token::CloseParen,
-                    from: Position { line: 0, position },
-                    to: Position { line: 0, position }
+                    from: Position { line: 1, position },
+                    to: Position { line: 1, position }
                 }
             );
         }
@@ -514,11 +514,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::Identifier(String::from("some_1dentifier")),
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 14
                 }
             }
@@ -531,11 +531,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::Identifier(String::from("w1432")),
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 3
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 7
                 }
             }
@@ -545,11 +545,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 8
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 8
                 }
             }
@@ -567,11 +567,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::Number(120.0),
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 2
                 }
             }
@@ -584,11 +584,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::Number(3.14159),
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 3
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 9
                 }
             }
@@ -598,11 +598,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 10
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 10
                 }
             }
@@ -625,14 +625,14 @@ mod tests {
             assert_eq!(
                 from,
                 Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 }
             );
             assert_eq!(
                 to,
                 Position {
-                    line: 0,
+                    line: 1,
                     position: 6
                 }
             );
@@ -680,28 +680,28 @@ mod tests {
             TokenAndSpan {
                 token: Token::Def,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 2
                 }
             }
         );
         assert!(handler.next().is_none());
 
-        let mut handler = GreedyTokenizer::new(&b"   if)  # whodat"[..])?;
+        let mut handler = GreedyTokenizer::new(&b"   fn)  # whodat"[..])?;
         assert_eq!(
             handler.next().unwrap()?,
             TokenAndSpan {
-                token: Token::If,
+                token: Token::Fn,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 3
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 4
                 }
             }
@@ -711,11 +711,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 5
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 5
                 }
             }
@@ -733,11 +733,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::Identifier(String::from("+")),
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 0
                 }
             }
@@ -750,11 +750,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::Identifier(String::from("-")),
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 3
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 3
                 }
             }
@@ -764,11 +764,11 @@ mod tests {
             TokenAndSpan {
                 token: Token::CloseParen,
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 4
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 4
                 }
             }
@@ -786,11 +786,11 @@ mod tests {
                 TokenAndSpan {
                     token: Token::CloseParen,
                     from: Position {
-                        line: 0,
+                        line: 1,
                         position: 1
                     },
                     to: Position {
-                        line: 0,
+                        line: 1,
                         position: 1
                     }
                 }
@@ -804,11 +804,11 @@ mod tests {
                 TokenAndSpan {
                     token: Token::Number(1.0),
                     from: Position {
-                        line: 0,
+                        line: 1,
                         position: 1
                     },
                     to: Position {
-                        line: 0,
+                        line: 1,
                         position: 5
                     }
                 }

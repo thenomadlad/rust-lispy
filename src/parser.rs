@@ -1,5 +1,5 @@
 use crate::ast::AST;
-use crate::tok::{Token, TokenAndSpan, Tokenizer, TokenizerError};
+use crate::tok::{Token, Position, TokenAndSpan, Tokenizer, TokenizerError};
 
 pub struct RecursiveDescentParser {
     tokenizer: Box<dyn Tokenizer>,
@@ -7,15 +7,19 @@ pub struct RecursiveDescentParser {
 
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
-    MismatchedParens,
-    UnexpectedEof,
+    MismatchedParens(Position),
+    FunctionNeedsABody,
+    UnexpectedEof(Position),
     UnexpectedTokenError {
         expected: Option<Token>,
         found: Option<Token>,
+        from: Position,
+        to: Position,
     },
     UnexpectedExpressionError {
         expected: Option<AST>,
         found: Option<AST>,
+        position: Position,
     },
     TokenizerError(TokenizerError),
     UnknownError(String),
@@ -42,7 +46,7 @@ impl RecursiveDescentParser {
             match asts.len() {
                 1 => Ok(Some(Box::new(asts.pop().unwrap()))),
                 num_terms if num_terms > 1 => Err(ParseError::UnknownError(String::from("Not sure how we got here, but we have multiple statements with the same open/close brackets"))),
-                _ => Err(ParseError::UnexpectedEof)
+                _ => Err(ParseError::UnknownError(String::from("Here we are but how")))
             }
         }
     }
@@ -65,10 +69,11 @@ impl RecursiveDescentParser {
                             let (mut rhs, rec_parsed) =
                                 Self::recursively_evaluate(&tokens_and_spans[parsed + 2..])?;
 
-                            if rec_parsed > 1 {
+                            if rhs.len() > 1 {
                                 return Err(ParseError::UnexpectedExpressionError {
                                     expected: None,
-                                    found: rhs.get(1).cloned(),
+                                    found: rhs.get(0).cloned(),
+                                    position: tokens_and_spans[parsed + 2].from.clone()
                                 });
                             }
 
@@ -78,11 +83,84 @@ impl RecursiveDescentParser {
                             });
 
                             // we also parsed the next two tokens
-                            parsed += 2;
+                            parsed += 1 + rec_parsed;
                         } else {
                             return Err(ParseError::UnexpectedTokenError {
                                 expected: Some(Token::Identifier(String::from("_"))),
                                 found: Some(tokens_and_spans[parsed + 1].token.clone()),
+                                from: tokens_and_spans[parsed + 1].from.clone(),
+                                to: tokens_and_spans[parsed + 1].to.clone(),
+                            });
+                        }
+                    }
+
+                    Token::Fn => {
+                        if let Token::OpenParen = &tokens_and_spans[parsed + 1].token {
+                            let mut total_tokens_parsed = 0;
+
+                            // parse the args, make sure we have an open brancket and then get ourselves the tokens within them
+                            let args_and_spans =
+                                Self::find_tokens_within_brackets(&tokens_and_spans[parsed + 1..])?;
+                            let mut parameters = vec![];
+                            for arg_and_span in args_and_spans {
+                                if let Token::Identifier(ref arg_name) = arg_and_span.token {
+                                    parameters.push(String::from(arg_name))
+                                } else {
+                                    return Err(ParseError::UnexpectedTokenError {
+                                        expected: Some(Token::Identifier(String::from("_"))),
+                                        found: Some(arg_and_span.token.clone()),
+                                        from: arg_and_span.from.clone(),
+                                        to: arg_and_span.to.clone()
+                                    });
+                                }
+                            }
+
+                            total_tokens_parsed += 2 + parameters.len();  // include the bracket open and close
+
+                            // parse the body of the function
+                            if tokens_and_spans[parsed + total_tokens_parsed + 1].token
+                                != Token::OpenParen
+                            {
+                                return Err(ParseError::UnexpectedTokenError {
+                                    expected: Some(Token::OpenParen),
+                                    found: Some(
+                                        tokens_and_spans[parsed + total_tokens_parsed + 1]
+                                            .token
+                                            .clone(),
+                                    ),
+                                    from: tokens_and_spans[parsed + total_tokens_parsed + 1]
+                                        .from
+                                        .clone(),
+                                    to: tokens_and_spans[parsed + total_tokens_parsed + 1]
+                                        .to
+                                        .clone(),
+                                });
+                            }
+
+                            let function_body_tokens = Self::find_tokens_within_brackets(
+                                &tokens_and_spans[parsed + total_tokens_parsed + 1..],
+                            )?;
+                            let (statements, rec_parsed) =
+                                Self::recursively_evaluate(function_body_tokens)?;
+
+                            if rec_parsed == 0 {
+                                return Err(ParseError::FunctionNeedsABody);
+                            }
+
+                            total_tokens_parsed += 2 + rec_parsed;  // include the bracket open and close
+
+                            result.push(AST::FunctionExpr {
+                                parameters,
+                                statements,
+                            });
+
+                            parsed += total_tokens_parsed;
+                        } else {
+                            return Err(ParseError::UnexpectedTokenError {
+                                expected: Some(Token::OpenParen),
+                                found: Some(tokens_and_spans[parsed + 1].token.clone()),
+                                from: tokens_and_spans[parsed + 1].from.clone(),
+                                to: tokens_and_spans[parsed + 1].to.clone(),
                             });
                         }
                     }
@@ -107,10 +185,17 @@ impl RecursiveDescentParser {
                                     args: args.clone(),
                                 })
                             }
+                            Some((AST::FunctionExpr {parameters, statements}, [])) => {
+                                result.push(AST::FunctionExpr {
+                                    parameters: parameters.clone(),
+                                    statements: statements.clone()
+                                })
+                            }
                             _ => {
                                 return Err(ParseError::UnexpectedExpressionError {
                                     expected: Some(AST::VariableExpr(String::from("_"))),
                                     found: stuff.first().cloned(),
+                                    position: tokens_and_spans[parsed].from.clone(),
                                 })
                             }
                         }
@@ -118,7 +203,14 @@ impl RecursiveDescentParser {
 
                     // close paren tokens indicate we should go up one level, and so return
                     Token::CloseParen => break,
-                    _ => {}
+
+                    Token::Unknown(chr) => return Err(ParseError::UnexpectedTokenError {
+                        expected: None,
+                        found: Some(Token::Unknown(chr)),
+                        from: tokens_and_spans[parsed].from.clone(),
+                        to: tokens_and_spans[parsed].to.clone(),
+                    })
+
                 }
             } else {
                 break;
@@ -158,10 +250,48 @@ impl RecursiveDescentParser {
 
         // if we matched all parens, we're good
         if paren_count != 0 {
-            Err(ParseError::MismatchedParens)
+            Err(ParseError::MismatchedParens(
+                extracted_tokens.last().unwrap().from.clone()
+            ))
         } else {
             Ok(extracted_tokens)
         }
+    }
+
+    fn slice_until_tokens_match(
+        tokens_and_spans: &[TokenAndSpan],
+    ) -> Result<&[TokenAndSpan], ParseError> {
+        let mut paren_count = 0;
+        let mut end_idx = 0;
+
+        for token_and_span in tokens_and_spans {
+            match token_and_span.token {
+                Token::OpenParen => paren_count += 1,
+                Token::CloseParen => paren_count -= 1,
+                _ => {}
+            }
+
+            // push end_idx forward
+            end_idx += 1;
+
+            // if we don't have open or closed parens remaining, let's return
+            if paren_count <= 0 {
+                break;
+            }
+        }
+
+        // if we matched all parens, we're good
+        if paren_count != 0 {
+            Err(ParseError::MismatchedParens(tokens_and_spans[end_idx - 1].from.clone()))
+        } else {
+            Ok(&tokens_and_spans[0..end_idx])
+        }
+    }
+
+    fn find_tokens_within_brackets(
+        tokens_and_spans: &[TokenAndSpan],
+    ) -> Result<&[TokenAndSpan], ParseError> {
+        Self::slice_until_tokens_match(tokens_and_spans).map(|slc| &slc[1..slc.len() - 1])
     }
 }
 
@@ -192,11 +322,11 @@ mod tests {
                     .map(|token| TokenAndSpan {
                         token,
                         from: Position {
-                            line: 0,
+                            line: 1,
                             position: 0,
                         },
                         to: Position {
-                            line: 0,
+                            line: 1,
                             position: 1,
                         },
                     })
@@ -234,11 +364,11 @@ mod tests {
             TokenizerError::ReadError {
                 message: String::from("who dat"),
                 from: Position {
-                    line: 0,
+                    line: 1,
                     position: 0,
                 },
                 to: Position {
-                    line: 0,
+                    line: 1,
                     position: 0,
                 },
             },
@@ -253,14 +383,14 @@ mod tests {
                 assert_eq!(
                     from,
                     Position {
-                        line: 0,
+                        line: 1,
                         position: 0
                     }
                 );
                 assert_eq!(
                     to,
                     Position {
-                        line: 0,
+                        line: 1,
                         position: 0
                     }
                 );
@@ -277,6 +407,19 @@ mod tests {
         assert_eq!(parser.next_expression().unwrap(), None);
     }
 
+    #[test]
+    fn it_handles_unknown_token() {
+        let tok = MockyTokenizer::new_with_zeros(vec![Token::Unknown('.')]);
+
+        let mut parser = RecursiveDescentParser::new(Box::new(tok));
+        assert_eq!(parser.next_expression(), Err(ParseError::UnexpectedTokenError {
+            expected: None,
+            found: Some(Token::Unknown('.')),
+            from: Position { line: 1, position: 0 },
+            to: Position { line: 1, position: 1 },
+        }));
+    }
+
     #[rstest]
     // numeric bois
     #[case(Token::Number(-1.0), AST::NumberExpr(-1.0))]
@@ -291,11 +434,11 @@ mod tests {
         let tok = MockyTokenizer::new(vec![TokenAndSpan {
             token,
             from: Position {
-                line: 0,
+                line: 1,
                 position: 0,
             },
             to: Position {
-                line: 0,
+                line: 1,
                 position: 1,
             },
         }]);
@@ -333,7 +476,8 @@ mod tests {
             parser.next_expression().unwrap_err(),
             ParseError::UnexpectedExpressionError {
                 expected: Some(AST::VariableExpr(String::from("_"))),
-                found: Some(AST::NumberExpr(1.0))
+                found: Some(AST::NumberExpr(1.0)),
+                position: Position { line: 1, position: 0 }
             }
         );
     }
@@ -456,7 +600,9 @@ mod tests {
             parser.next_expression().unwrap_err(),
             ParseError::UnexpectedTokenError {
                 expected: Some(Token::Identifier(String::from("_"))),
-                found: Some(Token::Fn)
+                found: Some(Token::Fn),
+                from: Position { line: 1, position: 0 },
+                to: Position { line: 1, position: 1 },
             }
         );
 
@@ -475,18 +621,39 @@ mod tests {
             parser.next_expression().unwrap_err(),
             ParseError::UnexpectedExpressionError {
                 expected: None,
-                found: Some(AST::NumberExpr(2.0))
+                found: Some(AST::NumberExpr(2.0)),
+                position: Position { line: 1, position: 0 }
             }
         );
     }
 
     #[test]
-    #[ignore]
-    fn it_parses_a_function_definition_into_a_prototype() {
+    fn it_parses_a_function_definition_into_a_function() {
+        // function without args
         let tok = MockyTokenizer::new_with_zeros(vec![
             Token::OpenParen,
             Token::Fn,
-            Token::Identifier(String::from("func_name")),
+            Token::OpenParen,
+            Token::CloseParen,
+            Token::OpenParen,
+            Token::Identifier(String::from("contents")),
+            Token::CloseParen,
+            Token::CloseParen,
+        ]);
+
+        let mut parser = RecursiveDescentParser::new(Box::new(tok));
+        assert_eq!(
+            *parser.next_expression().unwrap().unwrap(),
+            AST::FunctionExpr {
+                parameters: vec![],
+                statements: vec![AST::VariableExpr(String::from("contents"))]
+            },
+        );
+
+        // function with args
+        let tok = MockyTokenizer::new_with_zeros(vec![
+            Token::OpenParen,
+            Token::Fn,
             Token::OpenParen,
             Token::Identifier(String::from("arg1")),
             Token::Identifier(String::from("arg2")),
@@ -501,10 +668,11 @@ mod tests {
         assert_eq!(
             *parser.next_expression().unwrap().unwrap(),
             AST::FunctionExpr {
-                name: String::from("func_name"),
                 parameters: vec![String::from("arg1"), String::from("arg2")],
-                body: Box::new(AST::VariableExpr(String::from("contents")))
+                statements: vec![AST::VariableExpr(String::from("contents"))]
             },
         );
+
+        // TODO: handle errors
     }
 }

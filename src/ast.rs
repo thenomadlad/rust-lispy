@@ -7,9 +7,8 @@ pub enum AST {
         args: Vec<AST>,
     },
     FunctionExpr {
-        name: String,
         parameters: Vec<String>,
-        body: Box<AST>,
+        statements: Vec<AST>,
     },
     ListExpr(Vec<AST>),
 }
