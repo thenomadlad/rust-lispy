@@ -6,7 +6,7 @@ production deployments
 ## Usage
 
 This program is used to tokenize, parse and compile a very minimal lisp into super optimized bytecode. The spec we use
-is [super simple](lisp-spec). If you have a file with lisp code following that spec (see [`examples/`](examples/)) you
+is [super simple](#lisp-spec). If you have a file with lisp code following that spec (see [`examples/`](examples/)) you
 can run some of the following commands:
 
 #### `help`
