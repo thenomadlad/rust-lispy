@@ -14,11 +14,12 @@ pub enum Token {
     // reserved keywords
     Def,
     Fn,
-    // If, // todo
+    // If, // TODO
 
     // more complex stuff
     Identifier(String),
     Number(f64),
+    // StringLiteral(""), // TODO
     Unknown(char),
 }
 
