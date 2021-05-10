@@ -654,14 +654,14 @@ mod tests {
             assert_eq!(
                 from,
                 Position {
-                    line: 1,
+                    line: 2,
                     position: 1
                 }
             );
             assert_eq!(
                 to,
                 Position {
-                    line: 1,
+                    line: 2,
                     position: 7
                 }
             );
@@ -796,7 +796,7 @@ mod tests {
                     }
                 }
             ),
-            "CloseParen[line 0 char 1]"
+            "CloseParen[line 1 char 1]"
         );
 
         assert_eq!(
@@ -814,7 +814,7 @@ mod tests {
                     }
                 }
             ),
-            "Number(1.0)[line 0 char 1 -> line 0 char 5]"
+            "Number(1.0)[line 1 char 1 -> line 1 char 5]"
         );
     }
 }

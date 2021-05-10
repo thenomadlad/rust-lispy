@@ -72,8 +72,8 @@ impl RecursiveDescentParser {
                             if rhs.len() > 1 {
                                 return Err(ParseError::UnexpectedExpressionError {
                                     expected: None,
-                                    found: rhs.get(0).cloned(),
-                                    position: tokens_and_spans[parsed + 2].from.clone()
+                                    found: rhs.get(1).cloned(),
+                                    position: tokens_and_spans[parsed + 3].from.clone()
                                 });
                             }
 
